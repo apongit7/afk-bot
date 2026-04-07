@@ -1,13 +1,13 @@
 const mineflayer = require('mineflayer');
-const http = require('http'); // Required for Render to stay online
+const http = require('http'); 
 const config = require('./config.json');
 
-// --- RENDER WEB SERVER ---
-// This keeps the bot alive 24/7 by pretending to be a website.
+// --- RENDER KEEP-ALIVE SERVER ---
+// This prevents Render from putting the bot to sleep.
 http.createServer((req, res) => {
-  res.write('HonorBot is Online!');
+  res.write('HonorBot System is Active!');
   res.end();
-}).listen(process.env.PORT || 3000);
+}).listen(process.env.PORT || 10000);
 
 const bot = mineflayer.createBot({
   host: config.serverHost,
@@ -19,35 +19,44 @@ const bot = mineflayer.createBot({
 });
 
 let movementPhase = 0;
+let hasLoggedIn = false;
 const STEP_INTERVAL = 1500;
 const JUMP_DURATION = 500;
 
-// --- AUTHME LOGIN HANDLER ---
+// --- AUTHME AUTOMATIC HANDLER ---
 bot.on('message', (jsonMsg) => {
   const message = jsonMsg.toString();
   console.log(`[CHAT] ${message}`);
 
-  // Automatically detects if the server asks to register or login
+  // If the server asks to register, we do it instantly
   if (message.includes('/register')) {
     bot.chat(`/register ${config.authmePassword} ${config.authmePassword}`);
-  } else if (message.includes('/login')) {
+  } 
+  // If the server asks to login, we do it
+  else if (message.includes('/login')) {
     bot.chat(`/login ${config.authmePassword}`);
   }
 });
 
 bot.on('spawn', () => {
-  console.log(`✅ ${config.botUsername} has joined the server!`);
+  console.log(`✅ ${config.botUsername} has joined. Waiting 10s for world load...`);
   
-  // Extra safety: Try to login 3 seconds after spawning just in case
-  setTimeout(() => {
-    bot.chat(`/login ${config.authmePassword}`);
-  }, 3000);
+  if (hasLoggedIn) return;
 
-  bot.setControlState('sneak', true);
-  setTimeout(movementCycle, STEP_INTERVAL);
+  // 10 Second Safety Delay to prevent "Moved too quickly" kicks
+  setTimeout(() => {
+    // Safety login attempt
+    bot.chat(`/login ${config.authmePassword}`);
+    
+    bot.setControlState('sneak', true);
+    console.log("🛡️ Bot is now sneaking and starting movement...");
+    
+    movementCycle();
+    hasLoggedIn = true;
+  }, 10000); 
 });
 
-// --- YOUR ORIGINAL MOVEMENT LOGIC ---
+// --- ANTI-AFK MOVEMENT LOGIC ---
 function movementCycle() {
   if (!bot.entity) return;
 
@@ -55,26 +64,17 @@ function movementCycle() {
     case 0:
       bot.setControlState('forward', true);
       bot.setControlState('back', false);
-      bot.setControlState('jump', false);
       break;
     case 1:
       bot.setControlState('forward', false);
       bot.setControlState('back', true);
-      bot.setControlState('jump', false);
       break;
     case 2:
-      bot.setControlState('forward', false);
-      bot.setControlState('back', false);
       bot.setControlState('jump', true);
-      setTimeout(() => {
-        bot.setControlState('jump', false);
-      }, JUMP_DURATION);
+      setTimeout(() => bot.setControlState('jump', false), JUMP_DURATION);
       break;
     case 3:
-      bot.setControlState('forward', false);
-      bot.setControlState('back', false);
-      bot.setControlState('jump', false);
-      // Randomly look around to look more "human"
+      // Randomly look around to look like a real player
       const yaw = Math.random() * Math.PI * 2;
       bot.look(yaw, 0);
       break;
@@ -84,12 +84,14 @@ function movementCycle() {
   setTimeout(movementCycle, STEP_INTERVAL);
 }
 
-bot.on('error', (err) => {
-  console.error('⚠️ Error:', err);
+// --- ERROR & RECONNECT LOGIC ---
+bot.on('error', (err) => console.error('⚠️ Error:', err));
+
+bot.on('kicked', (reason) => {
+  console.log('⚠️ Bot was kicked for:', reason);
 });
 
 bot.on('end', () => {
-  console.log('⛔️ Bot Disconnected! Restarting...');
-  // This helps Render know it needs to restart the process
-  process.exit(1);
+  console.log('⛔️ Bot Disconnected! Render will restart it shortly.');
+  process.exit(1); // Tells Render to restart the script
 });
